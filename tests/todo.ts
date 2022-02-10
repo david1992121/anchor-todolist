@@ -122,10 +122,52 @@ describe('todo', () => {
       user: owner,
     });
     
-    console.log(cancelResult.list);
     const adderBalanceAfterCancel = await getAccountBalance(adder.key.publicKey); 
     expectBalance(adderBalanceAfterCancel, adderBalanceAfterAdd + LAMPORTS_PER_SOL, 'Cancel returns bounty to adder');
     expect(cancelResult.list.data.lines, 'Cancel removes item from list').deep.equals([]);
+  });
+
+  it('List owner then item creator', async () => {
+    const [owner, adder] = await createUsers(2);
+    const createdList = await createList(owner, 'list');
+    const ownerInitial = await getAccountBalance(owner.key.publicKey);
+  
+    const bounty = 5 * LAMPORTS_PER_SOL;
+    const { list, item } = await addItem({
+      list: createdList,
+      user: adder,
+      bounty,
+      name: 'An item',
+    });
+  
+    expect(await getAccountBalance(item.publicKey), 'initialized account has bounty').equals(bounty);
+  
+    const firstResult = await finishItem({
+      list,
+      item,
+      user: owner,
+      listOwner: owner,
+      expectAccountClosed: false
+    });
+  
+    expect(firstResult.list.data.lines, 'Item still in list after first finish').deep.equals([item.publicKey]);
+    expect(firstResult.item.data.creatorFinished, 'Creator finish is false after owner calls finish').equals(false);
+    expect(firstResult.item.data.listOwnerFinished, 'Owner finish flag gets set after owner calls finish').equals(true);
+    expect(await getAccountBalance(firstResult.item.publicKey), 'Bounty remains on item after one finish call').equals(
+      bounty
+    );
+  
+    const finishResult = await finishItem({
+      list,
+      item,
+      user: adder,
+      listOwner: owner,
+      expectAccountClosed: true,
+    });
+    
+    console.log("HEREHER");
+    expect(finishResult.list.data.lines, 'Item removed from list after both finish').deep.equals([]);
+    expectBalance(await getAccountBalance(owner.key.publicKey), ownerInitial + bounty, 'Bounty transferred to owner');
   });
 });
 
@@ -235,6 +277,46 @@ async function cancelItem({ list, item, itemCreator, user}) {
     list: {
       publicKey: list.publicKey,
       data: listData
+    }
+  }
+}
+
+async function finishItem({ list, item, user, listOwner, expectAccountClosed}) {
+  let program = programForUser(user);
+  await program.rpc.finish(list.data.name, {
+    accounts: {
+      list: list.publicKey,
+      listOwner: listOwner.key.publicKey,
+      item: item.publicKey,
+      user: user.key.publicKey,
+    }
+  })
+
+  if(!expectAccountClosed) {
+
+    let [listData, itemData] = await Promise.all([
+      program.account.todoList.fetch(list.publicKey),
+      program.account.listItem.fetch(item.publicKey),
+    ]);
+  
+    return {
+      list: {
+        publicKey: list.publicKey,
+        data: listData,
+      },
+      item: {
+        publicKey: item.publicKey,
+        data: itemData,
+      },
+    };
+  }else{
+    let listData = await program.account.todoList.fetch(list.publicKey);
+
+    return {
+      list: {
+        publicKey: list.publicKey,
+        data: listData
+      }
     }
   }
 }

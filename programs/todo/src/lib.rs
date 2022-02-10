@@ -90,6 +90,40 @@ pub mod todo {
     
         Ok(())
     }
+
+    pub fn finish(ctx: Context<Finish>, _list_name: String) -> ProgramResult {
+        let item = &mut ctx.accounts.item;
+        let list = &mut ctx.accounts.list;
+        let user = ctx.accounts.user.to_account_info().key;
+    
+        if !list.lines.contains(item.to_account_info().key) {
+            return Err(TodoListError::ItemNotFound.into());
+        }
+    
+        let is_item_creator = &item.creator == user;
+        let is_list_owner = &list.list_owner == user;
+    
+        if !is_item_creator && !is_list_owner {
+            return Err(TodoListError::FinishPermissions.into());
+        }
+    
+        if is_item_creator {
+            item.creator_finished = true;
+        }
+    
+        if is_list_owner {
+            item.list_owner_finished = true;
+        }
+    
+        if item.creator_finished && item.list_owner_finished {
+            let item_key = item.to_account_info().key;
+            list.lines.retain(|key| key != item_key);
+            item.close(ctx.accounts.list_owner.to_account_info())?;
+        }
+    
+        Ok(())
+    }
+    
 }
 
 #[error]
@@ -204,5 +238,24 @@ pub struct Cancel<'info> {
     pub item: Account<'info, ListItem>,
     #[account(mut, address=item.creator @ TodoListError::WrongItemCreator)]
     pub item_creator: AccountInfo<'info>,
+    pub user: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(list_name: String)]
+pub struct Finish<'info> {
+    #[account(mut,
+      has_one=list_owner @ TodoListError::WrongListOwner,
+      seeds=[
+        b"todolist",
+        list_owner.to_account_info().key.as_ref(),
+        name_seed(&list_name)
+      ],
+      bump=list.bump)]
+    pub list: Account<'info, TodoList>,
+    #[account(mut)]
+    pub list_owner: AccountInfo<'info>,
+    #[account(mut)]
+    pub item: Account<'info, ListItem>,
     pub user: Signer<'info>,
 }
