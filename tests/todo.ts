@@ -58,6 +58,44 @@ describe('todo', () => {
     });
     expect(again.list.data.lines, 'Item is added').deep.equals([result.item.publicKey, again.item.publicKey]);
   });
+
+  it('fails if the list is full', async () => {
+    const MAX_LIST_SIZE = 4;
+    const owner = await createUser();
+    const list = await createList(owner, 'list', MAX_LIST_SIZE);
+  
+    // Add 4 items, in parallel for speed.
+    await Promise.all(
+      new Array(MAX_LIST_SIZE).fill(0).map((_, i) => {
+        return addItem({
+          list,
+          user: owner,
+          name: `Item ${i}`,
+          bounty: 1 * LAMPORTS_PER_SOL,
+        });
+      })
+    );
+  
+    const adderStartingBalance = await getAccountBalance(owner.key.publicKey);
+  
+    // Now the list should be full.
+    try {
+      let addResult = await addItem({
+        list,
+        user: owner,
+        name: 'Full item',
+        bounty: 1 * LAMPORTS_PER_SOL,
+      });
+  
+      console.dir(addResult, { depth: null });
+      expect.fail('Adding to full list should have failed');
+    } catch (e) {
+      expect(e.toString()).contains('This list is full');
+    }
+  
+    let adderNewBalance = await getAccountBalance(owner.key.publicKey);
+    expect(adderStartingBalance, 'Adder balance is unchanged').equals(adderNewBalance);
+  });
 });
 
 async function getAccountBalance(pubkey) {
@@ -69,7 +107,7 @@ function expectBalance(actual, expected, message, slack = 20000) {
   expect(actual, message).within(expected - slack, expected + slack);
 }
 
-async function createUser(airdropBalance = 1000000000) {
+async function createUser(airdropBalance = 10 * LAMPORTS_PER_SOL) {
   airdropBalance = airdropBalance ?? 10 * LAMPORTS_PER_SOL;
   let user = anchor.web3.Keypair.generate();
   let sig = await provider.connection.requestAirdrop(user.publicKey, airdropBalance);
