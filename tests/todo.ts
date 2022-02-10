@@ -96,6 +96,37 @@ describe('todo', () => {
     let adderNewBalance = await getAccountBalance(owner.key.publicKey);
     expect(adderStartingBalance, 'Adder balance is unchanged').equals(adderNewBalance);
   });
+
+  it('List owner can cancel an item', async () => {
+    const [owner, adder] = await createUsers(2);
+    const list = await createList(owner, 'list');
+  
+    const adderStartingBalance = await getAccountBalance(adder.key.publicKey);
+  
+    const result = await addItem({
+      list,
+      user: adder,
+      bounty: LAMPORTS_PER_SOL,
+      name: 'An item',
+    });
+  
+    const adderBalanceAfterAdd = await getAccountBalance(adder.key.publicKey);
+  
+    expect(result.list.data.lines, 'Item is added to list').deep.equals([result.item.publicKey]);
+    expect(adderBalanceAfterAdd, 'Bounty is removed from adder').lt(adderStartingBalance);
+  
+    const cancelResult = await cancelItem({
+      list,
+      item: result.item,
+      itemCreator: adder,
+      user: owner,
+    });
+    
+    console.log(cancelResult.list);
+    const adderBalanceAfterCancel = await getAccountBalance(adder.key.publicKey); 
+    expectBalance(adderBalanceAfterCancel, adderBalanceAfterAdd + LAMPORTS_PER_SOL, 'Cancel returns bounty to adder');
+    expect(cancelResult.list.data.lines, 'Cancel removes item from list').deep.equals([]);
+  });
 });
 
 async function getAccountBalance(pubkey) {
@@ -184,4 +215,26 @@ async function addItem({ list, user, name, bounty }) {
       data: itemData,
     },
   };
+}
+
+async function cancelItem({ list, item, itemCreator, user}) {
+  let program = programForUser(user);
+  await program.rpc.cancel(list.data.name, {
+    accounts: {
+      list: list.publicKey,
+      listOwner: list.data.listOwner,
+      item: item.publicKey,
+      itemCreator: itemCreator.key.publicKey,
+      user: user.key.publicKey,
+    }
+  })
+
+  let listData = await program.account.todoList.fetch(list.publicKey);
+
+  return {
+    list: {
+      publicKey: list.publicKey,
+      data: listData
+    }
+  }
 }

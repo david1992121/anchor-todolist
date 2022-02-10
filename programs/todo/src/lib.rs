@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
+use anchor_lang::AccountsClose;
 
 declare_id!("uH5RdJNzRFYcm3bfvfLpJAHVp49RCGNw7wXTGr4cWNK");
 
 #[program]
 pub mod todo {
     use anchor_lang::solana_program::{program::invoke, system_instruction::transfer};
-
     use super::*;
 
     pub fn new_list(
@@ -63,6 +63,30 @@ pub mod todo {
                 ],
             )?;
         }
+    
+        Ok(())
+    }
+
+    pub fn cancel(ctx: Context<Cancel>, _list_name: String) -> ProgramResult {
+        let list = &mut ctx.accounts.list;
+        let item = &mut ctx.accounts.item;
+        let item_creator = &ctx.accounts.item_creator;
+    
+        let user = ctx.accounts.user.to_account_info().key;
+    
+        if &list.list_owner != user && &item.creator != user {
+            return Err(TodoListError::CancelPermissions.into());
+        }
+    
+        if !list.lines.contains(item.to_account_info().key) {
+            return Err(TodoListError::ItemNotFound.into());
+        }
+    
+        // Return the tokens to the item creator
+        item.close(item_creator.to_account_info())?;
+    
+        let item_key = ctx.accounts.item.to_account_info().key;
+        list.lines.retain(|key| key != item_key);
     
         Ok(())
     }
@@ -161,4 +185,24 @@ pub struct Add<'info> {
     pub item: Account<'info, ListItem>,
     pub user: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(list_name: String)]
+pub struct Cancel<'info> {
+    #[account(mut,
+      has_one=list_owner @ TodoListError::WrongListOwner,
+      seeds=[
+        b"todolist",
+        list_owner.to_account_info().key.as_ref(),
+        name_seed(&list_name)
+      ],
+      bump=list.bump)]
+    pub list: Account<'info, TodoList>,
+    pub list_owner: AccountInfo<'info>,
+    #[account(mut)]
+    pub item: Account<'info, ListItem>,
+    #[account(mut, address=item.creator @ TodoListError::WrongItemCreator)]
+    pub item_creator: AccountInfo<'info>,
+    pub user: Signer<'info>,
 }
